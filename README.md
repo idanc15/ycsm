@@ -21,7 +21,8 @@ chmod +x ycsm-setup.sh
 1) Setup Nginx Redirector
 2) Check Status
 3) Blocking Shodan
-4) Quit
+4) Add another domain
+5) Quit
 
   YCSM - Select an Option:
 ```
