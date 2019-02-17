@@ -50,8 +50,8 @@ ycsm_confirm() {
 }
 
 ycsm_install() {
-  CONF_DST="/etc/nginx/sites-enabled/default"
-
+  CONF_DST="/etc/nginx/sites-available/default"
+  
   ycsm_action "Installing Dependencies..."
   apt-get install -y vim less
 
@@ -77,50 +77,85 @@ ycsm_install() {
   cp -rf maps security /etc/nginx
   mv /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak 
   cp -rf ./nginx.conf /etc/nginx/nginx.conf
+  mv /etc/nginx/sites-available/default /etc/nginx/sites-available/default.bak
+  echo ' ' > /etc/nginx/sites-available/default
   check_errors
 
   ycsm_action "Finished installing dependencies!"
 }
 
-ycsm_initialize() {
-  ycsm_action "Modifying nginx configs..."
-  if [ "$#" -ne 2 ]; then
+ycsm_add_https() {
+
+  if [ "$#" -ne 3 ]; then
     read -r -p "What is the sites domain name? (ex: google.com) " domain_name
     read -r -p "What is the C2 server address? (IP:Port) " c2_server
+    read -r -p "What is the root path? (/var/www/domain_name) " root_path
   else
     domain_name=$1
     c2_server=$2
+    root_path=$3
   fi
 
-  cp ./default.conf $CONF_DST
+  cat http443.conf >> $CONF_DST  
 
   sed -i.bak "s/<DOMAIN_NAME>/$domain_name/" $CONF_DST
   rm $CONF_DST.bak
 
   sed -i.bak "s/<C2_SERVER>/$c2_server/" $CONF_DST
   rm $CONF_DST.bak
+
+  sed -i.bak "s/<ROOT_PATH>/$root_path/" $CONF_DST
+  rm $CONF_DST.bak
   check_errors
 
   SSL_SRC="/etc/letsencrypt/live/$domain_name"
   ycsm_action "Obtaining Certificates..."
-  /opt/letsencrypt/certbot-auto certonly --non-interactive --quiet --register-unsafely-without-email --agree-tos -a webroot --webroot-path=/var/www/html -d $domain_name
+  /opt/letsencrypt/certbot-auto certonly --non-interactive --quiet --register-unsafely-without-email --agree-tos -$
   check_errors
 
   ycsm_action "Installing Certificates..."
-  sed -i.bak "s/^#ycsm#//g" $CONF_DST
+
   rm $CONF_DST.bak
   check_errors
 
+}
+
+ycsm_restart_nginx() {
   ycsm_action "Restarting Nginx..."
   systemctl restart nginx.service
   check_errors
+
+}
+
+ycsm_force_https() {
+  # Check if the user wants to force HTTPS
+  read -p "Force HTTPS? " -n 1 -r
+  echo
+  if [[ $REPLAY =~ ^[Yy]$ ]]
+  then
+     # Copy the HTTP80Redirect.conf content to the $CONF_DST
+     cat ./http80redirect.conf >> $CONF_DST
+  else
+     cat ./http80.conf >> $CONF_DST
+  fi
+
+}
+
+ycsm_initialize() {
+  ycsm_action "Modifying nginx configs..."
+  
+  ycsm_force_https
+
+  ycsm_add_https
+
+  ycsm_restart_nginx
 
   ycsm_action "Done!"
 }
 
 ycsm_setup() {
   ycsm_install
-  ycsm_initialize $1 $2
+  ycsm_initialize $1 $2 $3
 }
 
 ycsm_block_shodan() {
@@ -139,14 +174,14 @@ ycsm_status() {
 
 ycsm_check_root
 
-if [ "$#" -ne 3 ]; then
+if [ "$#" -ne 4 ]; then
   PS3="
   YCSM - Select an Option:  "
 
   finshed=0
   while (( !finished )); do
     printf "\n"
-    options=("Setup Nginx Redirector" "Check Status" "Blocking Shodan" "Quit")
+    options=("Setup Nginx Redirector" "Check Status" "Blocking Shodan" "Add Domain" "Quit")
     select opt in "${options[@]}"
     do
       case $opt in
@@ -161,7 +196,12 @@ if [ "$#" -ne 3 ]; then
         "Blocking Shodan")
           ycsm_block_shodan
           break;
-          ;;          
+          ;;
+	"Add Domain")
+	#TODO add domain to the conf file - break the initalize function to smaller functions
+	 ycsm_initialize
+	 break;
+         ;;
         "Quit")
           finished=1
           break;
@@ -171,5 +211,5 @@ if [ "$#" -ne 3 ]; then
     done
   done
 else
-  ycsm_setup $1 $2
+  ycsm_setup $1 $2 $3
 fi
